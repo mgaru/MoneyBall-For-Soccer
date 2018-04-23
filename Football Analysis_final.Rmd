@@ -1,0 +1,563 @@
+---
+title: "Football_Analysis_Final"
+author: "Mayur Garudi"
+date: "April 15, 2018"
+output: html_document
+---
+
+Let us first read the data into R. 
+
+```{r}
+library(tidyverse)
+Football_Players<- read.csv(".....input/football_players.csv")
+dim(Football_Players)
+```
+
+Let us now get a sense of the data. 
+
+```{r}
+
+str(Football_Players)
+```
+
+We can see that there are a lot of attributes in this dataset. The attributes are essentially about the 17k + football players from all around the world documented by FIFA- The world football governing body. 
+
+Essentially, the dataset explains in detail the player traits, nationalities, clubs they play for, wages they are paid, their release clause etc. 
+
+Obviously, this is a lot of information and to make the analysis swift and fruitful, we will be subsetting the dataset depending upon the type of analysis we aim to perform. 
+
+Moneyball for soccer, as the name suggests, will closely inspect how the money is tied to a footballer and explore the difference in quality and player parameters which come with it, among other things.
+
+
+
+INITIAL DATA EXPLORATION
+
+For such a large dataset, let us first explore the data a bit. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Youth players analysis-
+
+
+Let us see which countries have the most promosing young talent.
+
+As a convention, we will filter out all the players under the age of 22 as young players. We will also subset the rows which we are going to need.
+
+```{r}
+Youth<-Football_Players%>% filter(Football_Players$age<22)
+
+Youth_analysis<-subset(Youth,select = -c(ID,full_name,club_logo,special,birth_date,body_type,real_face,flag,photo,X1_on_1_rush_trait,acrobatic_clearance_trait,argues_with_officials_trait,avoids_using_weaker_foot_trait,backs_into_player_trait))
+dim(Youth_analysis)
+
+```
+
+
+Now let us group by these players by nationality and take their average potential. 
+
+```{r}
+Nations<-Youth_analysis%>% group_by(nationality)%>% summarise(Avg_potential=mean(potential))
+
+```
+
+Let us now visualize this data on the world map and see which countries have the most promising young players.
+
+```{r}
+suppressWarnings(library(rworldmap))
+
+
+
+Nations_potential <- joinCountryData2Map(dF = Nations,joinCode = "NAME",nameJoinColumn = "nationality",verbose=F) 
+
+mapCountryData(mapToPlot = Nations_potential,nameColumnToPlot = "Avg_potential",catMethod = "fixedWidth", colourPalette = "rainbow",
+               oceanCol = "steelblue1",missingCountryCol = "white",
+               mapTitle = "Average Youth Potential by Country",
+               aspect = "variable")
+
+
+
+```
+
+(The world map has been plotted with the following reference: https://www.kaggle.com/donyoe/taking-a-look-at-the-fifa-18-player-dataset)
+
+
+We can see that South American countries, West African countries and European countries have the players with highest potential. 
+
+AGE- PERFORMANCE-WAGE ANALYSIS
+
+
+Let us first inspect how a player's age affects his Potential and Current performance rating.
+
+```{r}
+Age<-Football_Players%>% group_by(age)%>% summarise(Overall=mean(overall),Potential=mean(potential))
+Age$age<-as.factor(Age$age)
+
+head(Age)
+
+```
+
+
+```{r}
+ggplot(Age)+geom_point(mapping=aes(age,Overall))
+```
+
+We can see that the overall rating of the player goes down with age. Except for a couple of outliers at age 40 and 44. 
+
+Thus we can say that the squad with a lower average age will perform better. Obviously, the process to reduce the average age of the squad will start with the clubs investing in young players (players below 22 years of age). These players can then develop into good first team players and reduce the average age of the squad. 
+
+Let us now see which clubs are the 'oldest' and need to bring their average age down. We will consider the top 4 European leagues since all the top players in the world play in these leagues.
+
+```{r}
+Clubs_data<-Football_Players%>% filter(league %in% c("French Ligue 1","English Premier League","Spanish Primera Divisi¨®n","Italian Serie A" ))%>% select(club,name,age,eur_wage,overall,potential)
+
+                                   
+```
+
+
+Now, let us get the club wise wage and age payment statistics 
+
+```{r}
+Clubs_age<-Clubs_data%>%group_by(club)%>% summarise(Avg_age=mean(age),Avg_rating=mean(overall),Avg_wage=mean(eur_wage))%>% arrange(desc(Avg_age))
+
+Clubs_age<-as.data.frame(Clubs_age)
+class(Clubs_age$club)
+
+head(Clubs_age)
+tail(Clubs_age)
+```
+
+
+Let us take a look at how the Wages change according to the pplayer's age and potential. 
+
+```{r}
+library(ggrepel)
+ggplot(Clubs_age)+ geom_point(mapping = aes(Avg_rating,Avg_age,size = Avg_wage, color = 'blue')) + geom_text_repel(aes(Avg_rating,Avg_age,color = 'red' , hjust = 1 ,label=ifelse(Avg_rating>75,as.character(club),''))) + theme_bw() + theme(legend.position="none") + geom_text_repel(aes(Avg_rating,Avg_age,color = 'green' ,label=ifelse((Avg_rating < 70 & Avg_age < 24),as.character(club),''))) + theme_bw() + theme(legend.position="none") + xlab('Average Rating') + ylab('Average Age')
+
+```
+
+In the above graph, the size of the points depicts the wages paid by the club to their players. We can clearly see that the clubs with higher average rating pay their players the most. These, incidentally, are also the top clubs in Europe who have all superstar players. We can also see that most of them have an average age around 25 indicating the players are at their peak around the age of 25. WE can also see that barring a few exceptions like Barcelona and Juventus, the average rating of the players in the clubs is less for more aged players.
+
+Juventus and Barcelona do pay a lot of money for a relatively older squad!
+
+
+WAGES v POSITIONS
+
+Leo Messi and Critstiano Ronaldo are the best footballers in the world right now. Needless to say they are the highest paid players in the world. From our knowledge of the game we know that they are both Forward players. But our dataset does not have any column which specifies the positions of the players. We want to explore how the money paid to a player is tied up to his position.
+
+We will thus use the kmeans clustering algorithm to assign positions to all our players. We will consider 4 main positions in the game of football- Forward, MIdfielder, Defender or Goalkeeper. 
+
+From our knowledge of football, let us subset the attributes which define the basic positions in football. 
+
+```{r}
+Football_positions<-subset(Football_Players,select=c(crossing,finishing,heading_accuracy,short_passing,volleys,dribbling,long_passing,ball_control,acceleration,sprint_speed,strength,interceptions,positioning,vision,composure,marking,standing_tackle,gk_diving,gk_handling,gk_positioning))
+str(Football_positions)
+```
+
+Let us make any NA values 0. It is essential for clustering that there are no NA values on the data. 
+```{r}
+Football_positions[is.na(Football_positions)]<-0
+
+```
+
+Now let us inspect clusters in our data. 
+
+```{r}
+set.seed(12345)
+Cluster_football<-kmeans(Football_positions,4)
+```
+
+
+Let us examine the size and centers of our clusters. 
+```{r}
+Cluster_football$size
+
+Cluster_football$centers
+```
+
+
+Now, let us add the positions to our dataframe.
+
+```{r}
+Football_positions$Position<-Cluster_football$cluster
+head(Football_positions)
+
+Football_positions$Position<- as.factor(Football_positions$Position)
+
+levels(Football_positions$Position) <- c('Midfielder','Forward','Defender','Goalkeeper')
+head(Football_positions)
+
+```
+ 
+
+Now, let us attach the positions to our main dataframe. 
+
+```{r}
+Football_Players_final<-cbind(Football_Players,Football_positions$Position)
+head(Football_Players_final)
+```
+
+Thus we can see that the Positions attribute is now assigned to all the players in our database.
+
+We can now go ahead and do the in depth analysis of player positions and the wages they are paid.
+
+
+WHICH POSITION GETS PAID THE MOST IN THE TOP 4 LEAGUES IN THE WORLD
+
+We will filter out the top 4 leagues in the world again because that's where the best players in the world play.
+
+```{r}
+Position_payment<-Football_Players_final%>% filter(league %in% c("French Ligue 1","English Premier League","Spanish Primera Divisi¨®n","Italian Serie A" ))%>% select(club,name,league,age,eur_wage,overall,potential,`Football_positions$Position`)
+
+colnames(Position_payment)<-c("Club","player_name","league","age","eur_wage","rating","potential","position")
+
+head(Position_payment)
+str(Position_payment)
+```
+
+Now we have a dataframe of the players in the top 4 leagues in the world. 
+
+
+```{r}
+ggplot(Position_payment)+geom_bar(mapping = aes(position,mean(eur_wage),fill=league),stat = "identity")+facet_wrap(~league)+coord_flip()+xlab("Wage")+ylab("Position")
+```
+
+We can see thet the Forwards in all 4 leagues are paid a lot of money compared to the other positions. 
+
+
+Let us now see in detail the payment pattern in the most famous league in the world- English Premier League. 
+
+
+
+```{r}
+
+England<-Position_payment%>% filter(league %in% "English Premier League")
+
+ggplot(England)+geom_point(mapping = aes(rating,eur_wage,color=position))+geom_text_repel(aes(rating,eur_wage, hjust = 1 ,label=ifelse(rating>85,as.character(player_name),''))) + theme_bw() + theme(legend.position="none") + geom_text_repel(aes(rating,eur_wage,label=ifelse((rating < 50),as.character(player_name),''))) + theme_bw() + theme() + xlab('Rating') + ylab('Wage')
+
+```
+
+Thus we can see that all the top rated strikers (Lukaku, Ibrahamovic,Aguero,Costa) from the top 4 English clubs (Manchester Utd, Manchester City, Chelsea, Arsenal) are right up there among the highest paid players. 
+
+Liverpool and Tottenham Hotspur who are also big clubs pay their stars a bit less as can be seen from the graph (Coutinho and Kane). 
+
+P.S. Since the data was catalogued, there have been a few transfers of players. 
+
+
+TRANSFER STRATEGY
+
+We saw how money is tied to player positions,age,potential and their ratings. Clearly, there is a lot of money flowing in the footballing world right now.
+
+With large sums of money flowing in the footballing world right now, the player values have hit an astronomical high and unimaginable sums are being quoted for the top players in the world. Obviously, there are many caveats to the money being spent with those actually afford to spend the money keeping an eye out on the wages the big stars will have to be paid. The smaller clubs meanwhile would want the best value for money buys. With the Financial Fair Play regulations dictating that a club shall spend no more than they earn (through revenues, ticket sales, merchandising and sponsorships), it has become even more important for the clubs to keep an eye out on their purse. But, like all things, they need to pay for the best! Such a scenario warrants wise spending depending upon the health of the current squad, funds available and the right deal to be struck with the player's parent club. 
+
+
+But the market being so inflated, the clubs need to know what the 'right' amount would be. We have a complete set of players with their values at our disposal. Let us consider that my project team is running a Football club.  We want to buy good first team players. Our coaches have worked hard thourghout the season and identified the type of players the club must sign to make the team even stronger.
+
+
+We need to buy a good first team goalkeeper. Our goalkeeping coaches have chalked out a set of attributes they think they want in this new goalkeeper we want to sign. 
+
+As club owners, we want to know how much this goalkeeper is likely going to cost us in this market.
+
+
+Firstly, let us start by making a new dataset of goalkeepers. We will use the fact that our dataset has NA values for 'st' and other positions for the players which are goalkeepers. 
+
+```{r}
+suppressWarnings(library(dplyr))
+G<-Football_Players%>% filter(Football_Players$rs %in% NA)
+dim(G)
+
+```
+
+We can see that our dataset has 2021 goalkeepers. 
+
+Let us now take a subset of only the attributes which are concerned with the goalkeepers.
+
+```{r}
+suppressWarnings(library(tidyverse))
+suppressWarnings(library(dplyr))
+
+Goalkeepers<-G%>% select(eur_value,potential,overall,gk_diving,gk_handling,gk_kicking,gk_positioning,gk_reflexes)
+
+```
+
+Let us now have a look at our goalkeepers dataset. 
+
+
+```{r}
+str(Goalkeepers)
+
+```
+
+
+Let us see the relationship of these parameters with the value of the goalkeeper. 
+```{r}
+suppressWarnings(library(psych))
+
+pairs.panels(Goalkeepers)
+
+```
+
+
+
+We can thus see that all the parameters have an impact on the goalkeeper prices. Now, let us plot these variables vs the eur_value which is of our interest. 
+
+```{r}
+suppressWarnings(library(ggplot2))
+
+ggplot(Goalkeepers)+ geom_point(mapping = aes(potential,eur_value))
+```
+
+We can see that the value of goalkeeper exponentially increases with his potential. We will include potential in our model. 
+
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(overall,eur_value))
+
+```
+
+
+Like potential, the overall parameter also has an exponential relationship with the value. We will include it in our model as well.
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(gk_diving,eur_value))
+
+```
+
+Like potential, the gk_diving parameter also has an exponential relationship with the value. We will include it in our model as well.
+
+
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(gk_handling,eur_value))
+
+```
+
+The gk_handling parameter also has an exponential relationship with the value. We will include it in our model as well.
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(gk_kicking,eur_value))
+
+```
+
+We can see that gk_kicking doesn't really make any pattern with the eur_value. We will exclude this variable from our model. 
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(gk_positioning,eur_value))
+
+```
+The gk_diving positioning  also has an exponential relationship with the value. We will include it in our model as well.
+
+```{r}
+ggplot(Goalkeepers)+ geom_point(mapping = aes(gk_reflexes,eur_value))
+
+```
+
+The gk_reflexes positioning  also has an exponential relationship with the value. We will include it in our model as well.
+
+
+The Eur_value is very large and we need to scale it. But before we do it, we will first store the max and min values of that column so that we can use them while rescaling. 
+
+```{r}
+Max_eur<-max(G$eur_value)
+Min_eur<-min(G$eur_value)
+```
+
+Let us now normalize the eur-val by first writing a function.
+
+```{r}
+Normalize<-function(x){
+  (x-max(x))/(max(x)-min(x))
+}
+
+Goalkeepers$eur_value<-Normalize(Goalkeepers$eur_value)
+```
+
+So now that we have selected the parameters to be included in the model, let us divide our dataset into training and testing datasets. 
+
+
+```{r}
+suppressWarnings(library(caret))
+
+Goalk<-createDataPartition(Goalkeepers$eur_value,p=0.9,list = FALSE)
+Train_g<-Goalkeepers[Goalk,]
+Test_g<-Goalkeepers[-Goalk,]
+
+dim(Train_g)
+dim(Test_g)
+```
+
+Thus, we can see that we have successfully created training and testing datasets.
+
+Now, let us train the model on our training dataset. 
+
+
+```{r}
+gk<-lm(formula = eur_value~ potential+overall+gk_diving+gk_handling+gk_positioning+gk_reflexes,data = Goalkeepers)
+summary(gk)
+```
+
+Let us now predict the test dataset. 
+
+```{r}
+Pred_gk<-predict(gk,Test_g)
+Pred_gk
+
+
+
+```
+
+Let us evaluate our model performance.
+
+```{r}
+Error<-Pred_gk-Test_g$eur_value
+
+Sq_Error<-Error^2
+
+MeanSqerror<-mean(Sq_Error)
+
+RootMSE<-MeanSqerror^0.5
+
+RootMSE
+```
+
+Thus we can see that the RMSE is 0.03. 
+
+Now suppose that the Goalkeeping coaches at the club want to buy a goalkeeper with the following attributes:potential=95,overall=90,gk_diving=90,gk_handling=92,gk_positioning=88,gk_reflexes=92
+
+
+As a club owner, I want to find out how much a goalkeeper of the above attributes is likely going to cost me. We will use the linear regression model we trained above to predict it. 
+
+```{r}
+
+suppressWarnings(library(DMwR))
+New_Goalkeeper<-data.frame(potential=85,overall=90,gk_diving=80,gk_handling=80,gk_positioning=88,gk_reflexes=83)
+
+New_Goalkeeper_pred<-predict(gk,New_Goalkeeper)
+
+New_Goalkeeper_Price<- (Max_eur-Min_eur)*New_Goalkeeper_pred+Min_eur
+New_Goalkeeper_Price
+
+
+
+```
+
+Thus we found out that to by a goalkeeper of the attributes we want to, it is going to cost us a huge 52,248,189 Eur. 
+
+Our algorithm handled the prediction of price really well. 
+
+
+We used linear regression to predict the price of the goalkeeper. 
+
+
+There is another model we will build to predict the price of any outfield player. We will use both Linear Regression and Random Forest algorithm to predict the prices this time. 
+
+
+Let us start off by loading all the libraries in R. 
+```{r}
+
+suppressWarnings(library(randomForest))
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(tidyr))
+suppressWarnings(library(dplyr))
+suppressWarnings(library(tidyverse))
+suppressWarnings(library(modelr))
+
+```
+
+library(readr)
+football_players <- read_csv("C:/Users/Mayur/Desktop/neu/Spring 18/Intro to Data processing/project topics/football_players.csv")
+
+summary(football_players)
+
+We need to select the player attributes to include in the step regression model.
+
+```{r}
+
+columns <- as.data.frame(colnames(Football_Players)) 
+player_data <- Football_Players[ ,c(7,10,11,17,(20:67))]
+
+player_data[is.na(player_data)]  <- 0
+str(player_data)
+dim(player_data)
+
+
+anyNA(player_data)
+player_data$work_rate_att <- as.factor(player_data$work_rate_att)
+player_data$work_rate_def <- as.factor(player_data$work_rate_def)
+player_data$preferred_foot <- as.factor(player_data$preferred_foot)
+
+
+```
+
+ 
+
+
+
+```{r}
+set.seed(100)
+
+partition <- resample_partition(player_data, c(train= 0.7, test = 0.3))
+
+partition_train <- as_tibble(partition$train)
+partition_test <- as_tibble(partition$test)
+dim(partition_train)
+
+
+regression_step  <- step(lm(eur_value ~ . , data = partition_train))
+
+summary(regression_step)
+
+```
+'r paste(regression_step, collapse='\n')`
+
+We see that the r squared value is 0.66 which is good enough. 
+
+
+Now, let us train the Random Forest model. 
+
+```{r}
+forest <- randomForest(eur_value ~ long_passing + weight_kg + positioning + weak_foot + aggression + free_kick_accuracy + standing_tackle + work_rate_att + height_cm + heading_accuracy + pas + pac + short_passing + crossing + finishing + strength + shot_power + penalties + work_rate_def+ skill_moves + marking + reactions + phy + potential + stamina + dri + age + overall + international_reputation, data = partition_train, importance = TRUE)
+testforest <- predict(forest,partition_test)
+
+```
+
+
+```{r}
+accuracy <- function(actual, predict){
+  count = 0
+  ncount = 0
+  error = abs(actual - predict)
+  for( i in 1:length(actual)){
+    if (error[i] <= 250000) {count = count + 1} 
+    else( ncount = ncount + 1)
+  }
+  acc <- 100*count/(ncount + count)
+  return(acc)}
+
+accuracy(partition_test$eur_value,testforest)
+```
+
+
+
+The  prediction accuracy of value for a particular player  is 85.38 %  with 250K ??? +- tolerance.
+
+
+Thus, we have just built a model which can successfully predict the price of any player when our choice of attributes are given to the model. 
+
+We can thus make a transfer budget by finding out what would be the amount of money we will realistically have to spend to sign the players we want to in the transfer market. 
+
+
+
+CONCLUSION
+
+We thus saw how money is tied up with different parameters in the world of football.We saw how money paid to a footballer varies with player positions to player ages to their potential, We also used kmeans clustering to assign all 17k+ players a Playing Positions according to their attributes. We then went on and analyzed how the wages paid vary according to the player positions. Lastly, we developed two algorithms which will help us shape the transfer budget and in a way dictate the transfer strategy. 
